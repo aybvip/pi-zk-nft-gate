@@ -8,6 +8,7 @@
     "pi-zk-nft-gate": "./zk-gate.mjs"
   },
   "scripts": {
+    "test": "node --test test.mjs",
     "probe": "node zk-gate.mjs --probe",
     "design": "node zk-gate.mjs --design"
   },

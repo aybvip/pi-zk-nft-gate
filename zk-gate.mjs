@@ -20,7 +20,11 @@ import { parseArgs } from "node:util";
 
 const RPCS = {
   testnet: "https://rpc.testnet.minepi.com",
-  mainnet: "https://api.mainnet.minepi.com",
+  // MEASURED 2026-10-19: no public Soroban JSON-RPC exists on Pi Mainnet.
+  // rpc.mainnet.minepi.com and soroban-rpc.mainnet.minepi.com both answer
+  // HTTP 503 and serve a certificate that expired 2023-05-30.
+  // api.mainnet.minepi.com is a REST (Horizon) API, not JSON-RPC.
+  mainnet: null,
 };
 
 async function rpc(rpcUrl, method, params = {}) {
@@ -40,7 +44,9 @@ function usage() {
     [
       "Pi ZK NFT Gate",
       "",
-      "  node zk-gate.mjs --probe [--network testnet|mainnet]   probe live ZK capabilities",
+      "  node zk-gate.mjs --probe [--network testnet]            probe live RPC surface",
+      "  node zk-gate.mjs --probe --offline                      probe layout, no network",
+      "  node zk-gate.mjs --probe --rpc <url>                     target another endpoint",
       "  node zk-gate.mjs --design                               print the design document",
     ].join("\n")
   );
@@ -51,6 +57,8 @@ const { values } = parseArgs({
     probe: { type: "boolean", default: false },
     design: { type: "boolean", default: false },
     network: { type: "string", default: "testnet" },
+    rpc: { type: "string" },
+    offline: { type: "boolean", default: false },
     help: { type: "boolean", default: false },
   },
 });
@@ -61,7 +69,24 @@ if (values.help || (!values.probe && !values.design)) {
 }
 
 const network = values.network === "mainnet" ? "mainnet" : "testnet";
-const rpcUrl = RPCS[network];
+const rpcUrl = values.rpc ?? RPCS[network];
+
+if (values.probe && !rpcUrl && !values.offline) {
+  console.error(
+    [
+      `ERROR: no public Soroban RPC is known for network "${network}".`,
+      "",
+      "Measured 2026-10-19:",
+      "  rpc.mainnet.minepi.com        -> HTTP 503 (no healthy backend)",
+      "  soroban-rpc.mainnet.minepi.com -> HTTP 503 (no healthy backend)",
+      "  both serve a certificate that expired 2023-05-30",
+      "",
+      "api.mainnet.minepi.com is a REST (Horizon) API, not a Soroban RPC.",
+      "Use --rpc <url> to target another endpoint, or --network testnet.",
+    ].join("\n")
+  );
+  process.exit(2);
+}
 
 const DESIGN = `
 # ZK-Gated NFT Access — design
@@ -109,18 +134,50 @@ checks a proof, not a document.
 
   console.log("# Pi ZK NFT Gate — capability probe");
   console.log(`network: ${network}`);
-  console.log(`rpc:     ${rpcUrl}`);
+  console.log(`rpc:     ${rpcUrl ?? "(none — offline)"}`);
   console.log("");
 
+  if (values.offline) {
+    console.log("(--offline: network probes skipped; method list follows)");
+    console.log("");
+  }
+
+  // A valid ledger range is required: startLedger below the retention floor is
+  // a hard error, and endLedger is exclusive (measured 2026-10-19).
+  let oldest = null;
+  if (!values.offline) {
+    const h = await rpc(rpcUrl, "getHealth");
+    if (h && h.oldestLedger !== undefined) {
+      oldest = Number(h.oldestLedger);
+      console.log(`retention: oldest=${h.oldestLedger} latest=${h.latestLedger}`);
+      console.log("");
+    }
+  }
+
+  const ZERO_HASH = "0".repeat(64);
   const probes = [
+    ["getHealth", {}],
     ["getNetwork", {}],
-    ["getLedgers", { startLedger: 1, limit: 1 }],
-    ["getProtocolVersion", {}],
-    ["getEvents", { startLedger: 1, endLedger: 2, filters: [], limit: 1 }],
-    ["getTransaction", { hash: "0000000000000000000000000000000000000000000000000000000000000000" }],
+    ["getLatestLedger", {}],
+    ["getLedgers", oldest === null ? null : { startLedger: oldest, limit: 1 }],
+    ["getEvents", oldest === null ? null : { startLedger: oldest, endLedger: oldest + 1, filters: [], limit: 1 }],
+    ["getTransactions", oldest === null ? null : { startLedger: oldest, limit: 1 }],
+    ["getFeeStats", {}],
+    ["getTransaction", { hash: ZERO_HASH }],
+    // Negative controls: these are expected NOT to exist on this RPC.
+    ["getLedger", { ledgerSeq: oldest ?? 1 }],
+    ["getContractData", { contractId: "C" + "A".repeat(55) }],
   ];
 
   for (const [method, params] of probes) {
+    if (values.offline) {
+      console.log(`  ${method}: not probed (offline)`);
+      continue;
+    }
+    if (params === null) {
+      console.log(`  ${method}: skipped (no retention bounds available)`);
+      continue;
+    }
     const r = await rpc(rpcUrl, method, params);
     if (r && r.__httpError) {
       console.log(`  ${method}: HTTP ${r.__httpError}`);
@@ -135,7 +192,7 @@ checks a proof, not a document.
   console.log("");
   console.log("# ZK-specific surface");
   console.log(
-    "The Pi RPC does not currently expose a named ZK / proof-verification method."
+    "No ZK / proof-verification method appears in the RPC method set above."
   );
   console.log(
     "ZK capabilities (BN254, Poseidon) are introduced at the protocol level (v25+)"
@@ -146,6 +203,12 @@ checks a proof, not a document.
   console.log(
     "This probe therefore reports what the RPC exposes, not what the protocol supports."
   );
+  console.log("");
+  console.log("# Method-set caveat (measured 2026-10-19)");
+  console.log("  - getLedger and getContractData are NOT implemented ('method not found').");
+  console.log("  - getEvents accepts only filter types 'system' and 'contract'.");
+  console.log("  - getEvents endLedger is exclusive: [L, L] returns nothing.");
+  console.log("  - There is no public Soroban RPC on Mainnet (HTTP 503).");
   console.log("");
   console.log("# Next");
   console.log("Run with --design for the full design document.");
