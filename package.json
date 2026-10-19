@@ -1,0 +1,19 @@
+{
+  "name": "pi-zk-nft-gate",
+  "version": "0.1.0",
+  "description": "Read-only capability probe and design document for zero-knowledge-gated NFT access on Pi Network. Probes what the RPC exposes; documents the predicate/witness/proof/verifier design.",
+  "type": "module",
+  "main": "zk-gate.mjs",
+  "bin": {
+    "pi-zk-nft-gate": "./zk-gate.mjs"
+  },
+  "scripts": {
+    "probe": "node zk-gate.mjs --probe",
+    "design": "node zk-gate.mjs --design"
+  },
+  "keywords": ["pi", "zk", "bn254", "poseidon", "nft", "gate", "read-only"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
