@@ -1,0 +1,59 @@
+# Pi ZK NFT Gate — llms.txt
+# A read-only capability probe and design document for zero-knowledge-gated NFT
+# access on Pi Network.
+
+> This repository PROBES what the current Pi RPC exposes for ZK-related
+> capabilities and DOCUMENTS the design of a gate that grants access on proof of
+> a predicate without revealing the underlying identity.
+> It does NOT assert that a ZK gate is deployed on Pi today.
+
+## What it is
+- read-only, zero-dependency, Node (ESM), Node >= 18
+- zk-gate.mjs: the CLI (--probe --design --offline --network --rpc)
+- test.mjs: 12 offline checks (node --test; --probe --offline skips every
+  network call)
+- never writes; no database; no API keys
+
+## The two things it does
+1. Probe — query the live RPC and report which methods respond, so the boundary
+   between "protocol supports it" and "RPC exposes it" is MEASURED, not assumed.
+2. Design — a written design covering predicate, witness, proof, verifier
+   contract, and the trust boundary between them.
+
+## Measured RPC surface (2026-10-19, protocol 28)
+OK: getHealth (includes ledgerRetentionWindow: 120960), getNetwork (Pi Testnet,
+protocol 28), getLatestLedger, getLedgers, getEvents (endLedger exclusive;
+filters accept only "system"/"contract"), getTransactions, getFeeStats,
+getTransaction (unknown hashes -> status NOT_FOUND).
+Method not found: getLedger, getContractData.
+No method in the probe list takes or verifies a ZK proof. ZK capabilities are
+exercised INSIDE Soroban contracts, not through the RPC surface.
+
+Mainnet: there is no public Soroban RPC. rpc.mainnet.minepi.com and
+soroban-rpc.mainnet.minepi.com both answer HTTP 503 and serve a certificate that
+expired 2023-05-30. api.mainnet.minepi.com is REST (Horizon), not JSON-RPC.
+
+## Trust boundary
+- Prover: holds the private witness; can choose to prove, or not
+- Verifier contract: holds public inputs + verification key; deterministically
+  accepts or rejects
+- Setup: circuit-specific trusted setup (if any) — a critical trust assumption
+  that must be documented per circuit
+The gate proves A PREDICATE HOLDS, not WHO the person is.
+
+## Usage
+- node zk-gate.mjs --probe                 (read-only, testnet)
+- node zk-gate.mjs --probe --offline       (method list, no network)
+- node zk-gate.mjs --probe --rpc <url>
+- node zk-gate.mjs --design
+- node --test test.mjs
+Exit codes: 0 ok; 1 no mode; 2 refused (--probe --network mainnet without --rpc).
+
+## Not claimed
+- that a ZK gate is deployed on Pi today (this repo is a probe and a design)
+- that BN254 / Poseidon are exposed through the RPC surface (the probe measures
+  what the RPC returns; the capability lives inside Soroban contracts)
+- that any specific circuit is secure (circuit design and trusted setup are out
+  of scope)
+- that the method list is permanent (it is an observation on 2026-10-19)
+- that Pi Network has adopted, reviewed or endorsed this
